@@ -1,0 +1,23 @@
+[h1]modperf-bench — a measurement instrument, not gameplay content[/h1]
+
+A server-side benchmark that measures what DayZ script mechanisms actually cost on YOUR hardware: what a live repeating timer costs just by existing, what firing one adds, what an inventory attachment lookup costs per call, and what the common "hook a per-frame surface and throttle inside it" pattern costs against simply registering a slow timer.
+
+[b]Subscribing does nothing by itself.[/b] This mod is inert until you create a config file on the server — no timers, no samples, no files written. It has no client module, reads nothing about players, and never talks to the network.
+
+[h2]Who this is for[/h2]
+Server owners with a test box who want script-cost numbers they measured themselves instead of numbers someone asserted, and mod authors who want to verify (or dispute) a performance claim about their code with a reproducible run.
+
+[h2]⚠ Never run it on a populated server[/h2]
+The benches deliberately apply bulk synthetic load — hundreds of timers, a hundred thousand inventory lookups in one frame — to make nanosecond-scale costs visible in a frame-time distribution. That is the measurement working as designed, and it costs frame time for the duration of a run (tens of minutes). Load it only on a throwaway or offline instance.
+
+[h2]How to run it[/h2]
+1. Load on a TEST server: -serverMod=@modperf-bench (Linux: relative path only).
+2. Create $profile:modperf-bench/config.json (example config in the GitHub repo). That file is the arming switch.
+3. Boot. The suite runs settle → self-check → each bench under an A/B/A′ protocol (baseline, load, teardown, recovery), then goes idle.
+4. Read [modperf-bench] lines in the script log; the full artifact lands at $profile:modperf-bench/results-<timestamp>.json.
+
+Every verdict is honesty-first: a run that fails its own recovery check reports INVALID rather than a number, and a delta that doesn't clear twice the measured noise floor reports BELOW_NOISE rather than pretending to be a finding.
+
+[h2]Source, methodology, docs[/h2]
+Fully open source (MIT): https://github.com/mierst/modperf-bench
+The static-analysis model these measurements calibrate, and a report for any Workshop mod: https://dayz.fyi/modperf
