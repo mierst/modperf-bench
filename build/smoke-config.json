@@ -1,0 +1,21 @@
+{
+  "note": "smoke run - 5s settle, 5s windows, K=100 only",
+  "hardware_note": "local windows testbed",
+  "settle_seconds": 5,
+  "window_seconds": 5,
+  "block_seconds": 0.01,
+  "a_prime_tolerance_pct": 10,
+  "model_ns_timer_residency": 140,
+  "benches": ["B1", "B2", "B3", "B5"],
+  "k_values": [100],
+  "b2_k": 100,
+  "b2_periods_ms": [0, 10, 100, 1000],
+  "b5_units": 1000,
+  "b3_lookups": 100000,
+  "b3_repeats": 40,
+  "b3_entity": "PlateCarrierVest",
+  "b3_fallback_entity": "PlateCarrierVest",
+  "b3_slot": "",
+  "b3_attachment": "PlateCarrierHolster",
+  "b3_position": "1000 400 1000"
+}

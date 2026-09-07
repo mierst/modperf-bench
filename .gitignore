@@ -1,0 +1,16 @@
+# Build output (packaged mod folder produced by build/build.ps1)
+build/@modperf-bench/
+**/*.pbo
+
+# Results artifacts, if ever generated or copied next to the repo
+results-*.json
+
+# MakePbo staging
+build/staging/
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+*.swp
+.vscode/
+.idea/
