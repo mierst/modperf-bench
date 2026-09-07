@@ -60,7 +60,10 @@ a DayZ server with the mod loaded and confirming it comes up clean.
 
 ## Loading it
 
-Add the mod to your **test** server's server-side mod list:
+Subscribe on the Steam Workshop
+(https://steamcommunity.com/sharedfiles/filedetails/?id=3797721326) or build
+from source as above, then add the mod to your **test** server's server-side
+mod list:
 
 ```
 -serverMod=@modperf-bench
