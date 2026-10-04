@@ -14,3 +14,9 @@ Thumbs.db
 *.swp
 .vscode/
 .idea/
+
+# Offline analyzer caches and local run products
+__pycache__/
+*.pyc
+analysis-*.json
+comparison-*.json

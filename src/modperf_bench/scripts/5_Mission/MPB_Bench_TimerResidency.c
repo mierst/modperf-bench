@@ -1,24 +1,21 @@
 // ============================================================================
-// MPB_TimerLoad -- the load side of B1 (timer residency) and B2 (firing cost
-// vs residency).
+// MPB_TimerLoad -- ScriptCallQueue load. MPB_NativeTimerLoad below is a
+// separate, never-due native Timer treatment; these mechanisms are not priced
+// interchangeably.
 //
 // WHAT IS BEING MEASURED
-//   B1: what does merely HAVING a repeating call-queue entry cost per frame,
-//       before it does any work? Registered with period 0 and repeat=true, so
-//       the entry is due every frame, and the callback body is empty. The
-//       delta between the baseline and treatment windows, divided by K, is
-//       the per-timer per-frame cost.
+//   Period 0 CallLater: due/firing queue entries with empty callback bodies.
+//   Long-period CallLater: dormant queue entries, separately named by runner.
+//   Both include queue mechanics rather than native Timer residency alone.
 //   B2: the same K registrations at longer periods. A period of 10/100/1000 ms
 //       fires far less often than every frame, so whatever cost survives at
 //       long periods is residency (the queue walking the entry and finding it
 //       not due), and the difference against period 0 is firing cost.
 //
 // HOW K LIVE TIMERS COME FROM ONE METHOD
-//   ScriptCallQueue.CallLater registers a call, not a subscription: calling it
-//   K times with the SAME function reference adds K distinct queue entries.
-//   That is deliberate here -- it gives K identical, independently-walked
-//   entries whose only content is a return, which is exactly the unit the
-//   model prices.
+//   Calling the SAME function reference K times is an engine-dependent
+//   multiplicity premise. The counted one-versus-many prerequisite must
+//   demonstrate it on the current build before queue-dependent rows run.
 //
 // TEARDOWN
 //   ScriptCallQueue.Remove(fn) drops entries for that function+instance. It is
@@ -139,5 +136,87 @@ class MPB_TimerLoad
     int PeriodMs()
     {
         return m_PeriodMs;
+    }
+}
+
+// A native Timer is one retained object, not one CallLater registration.
+// The callback counter proves the dormancy condition throughout observation.
+// A fire invalidates residency rather than silently turning it into firing
+// cost. The runner must verify ActiveCount() equals requested K as well.
+class MPB_NativeTimerLoad
+{
+    static const int MAX_NATIVE_TIMERS = 10000;
+    static const float DORMANT_PERIOD_SECONDS = 86400.0;
+
+    ref array<ref Timer> m_NativeTimers;
+    int m_NativeFireCount;
+
+    void MPB_NativeTimerLoad()
+    {
+        m_NativeTimers = new array<ref Timer>();
+        m_NativeFireCount = 0;
+    }
+
+    void CountedTick()
+    {
+        m_NativeFireCount++;
+    }
+
+    void Apply(int count)
+    {
+        Remove();
+        m_NativeFireCount = 0;
+        if (count < 1 || count > MAX_NATIVE_TIMERS)
+        {
+            return;
+        }
+        int nativeIndex;
+        for (nativeIndex = 0; nativeIndex < count; nativeIndex++)
+        {
+            Timer nativeTimer = new Timer(CALL_CATEGORY_GAMEPLAY);
+            nativeTimer.Run(DORMANT_PERIOD_SECONDS, this, "CountedTick", null, true);
+            if (!nativeTimer.IsRunning())
+            {
+                nativeTimer.Stop();
+                Remove();
+                return;
+            }
+            m_NativeTimers.Insert(nativeTimer);
+        }
+    }
+
+    void Remove()
+    {
+        int stopIndex;
+        for (stopIndex = 0; stopIndex < m_NativeTimers.Count(); stopIndex++)
+        {
+            Timer stopTimer = m_NativeTimers.Get(stopIndex);
+            stopTimer.Stop();
+        }
+        m_NativeTimers.Clear();
+    }
+
+    int ActiveCount()
+    {
+        int runningCount = 0;
+        int runningIndex;
+        for (runningIndex = 0; runningIndex < m_NativeTimers.Count(); runningIndex++)
+        {
+            if (m_NativeTimers.Get(runningIndex).IsRunning())
+            {
+                runningCount++;
+            }
+        }
+        return runningCount;
+    }
+
+    int FireCount()
+    {
+        return m_NativeFireCount;
+    }
+
+    bool IsDormant()
+    {
+        return m_NativeFireCount == 0;
     }
 }

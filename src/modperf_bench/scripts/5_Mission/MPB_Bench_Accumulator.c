@@ -11,14 +11,17 @@
 //
 //   (a) is common because it is easy to write, and it is defended with "the
 //   work only runs once a minute". The work does -- the dispatch does not. B5
-//   measures the two arrangements against their own baselines so the choice
-//   can be made on a number.
+//   measures the two arrangements against their own baselines. The amplified
+//   accumulator includes loop and array access work; it does not independently
+//   calibrate virtual hook dispatch or imply a Timer residency constant.
 //
 // TWO VARIANTS, EACH WITH ITS OWN A/B/A' WINDOWS
 //   ACCUMULATOR: a no-op accumulator path is switched on inside the runner's
 //                own OnUpdate. Add a float, compare, reset on crossing. That
 //                is the whole treatment.
-//   SLOW_TIMER:  a single repeating 60 s call-queue entry.
+//   SLOW_TIMER:  a separately named repeating 24 h CallLater entry. Its period
+//                keeps it dormant in a bounded run; any crossing invalidates
+//                that residency condition. It is not a native Timer.
 //
 //   The honest expectation is that both land under the noise floor of a single
 //   window -- one accumulator step and one dormant queue entry are each far
@@ -32,7 +35,7 @@
 //   The noise floor is not assumed either: it is taken from the run's own
 //   recovery window, i.e. how far the server drifted between two windows with
 //   identical load. An effect smaller than that drift is not an effect this
-//   protocol can see.
+//   protocol can see. CallLater multiplicity must also pass its prerequisite.
 // ============================================================================
 
 class MPB_AccumulatorLoad
@@ -41,7 +44,7 @@ class MPB_AccumulatorLoad
 
     bool  m_Active;
     int   m_Units;
-    float m_Accumulated;
+    ref array<float> m_Accumulated;
     int   m_Crossings;
     int   m_SlowTimerCount;
 
@@ -49,7 +52,7 @@ class MPB_AccumulatorLoad
     {
         m_Active = false;
         m_Units = 0;
-        m_Accumulated = 0;
+        m_Accumulated = new array<float>();
         m_Crossings = 0;
         m_SlowTimerCount = 0;
     }
@@ -63,12 +66,17 @@ class MPB_AccumulatorLoad
     // and the per-unit figure divides by the same number.
     void ApplyAccumulator(int units)
     {
+        RemoveAccumulator();
         if (units < 1)
         {
             units = 1;
         }
         m_Units = units;
-        m_Accumulated = 0;
+        int initializeUnit;
+        for (initializeUnit = 0; initializeUnit < units; initializeUnit++)
+        {
+            m_Accumulated.Insert(0);
+        }
         m_Crossings = 0;
         m_Active = true;
     }
@@ -77,6 +85,7 @@ class MPB_AccumulatorLoad
     {
         m_Active = false;
         m_Units = 0;
+        m_Accumulated.Clear();
     }
 
     // Called unconditionally from the runner's OnUpdate. The branch on
@@ -91,23 +100,24 @@ class MPB_AccumulatorLoad
         int step;
         for (step = 0; step < m_Units; step++)
         {
-            m_Accumulated = m_Accumulated + timeslice;
-            if (m_Accumulated >= THRESHOLD_SECONDS)
+            float elapsed = m_Accumulated.Get(step) + timeslice;
+            if (elapsed >= THRESHOLD_SECONDS)
             {
-                m_Accumulated = 0;
+                elapsed = 0;
                 m_Crossings++;
             }
+            m_Accumulated.Set(step, elapsed);
         }
     }
 
-    // --- variant (b): one repeating 60 s call-queue entry -------------------
+    // --- variant (b): dormant repeating CallLater entries -----------------
 
     void SlowTick()
     {
         m_Crossings++;
     }
 
-    // Amplified for the same reason as the accumulator: `units` dormant 60 s
+    // Amplified for the same reason as the accumulator: `units` dormant 24 h
     // entries, so the per-unit figure has something above the noise floor to
     // divide.
     void ApplySlowTimer(int units)
@@ -123,7 +133,7 @@ class MPB_AccumulatorLoad
         int registered;
         for (registered = 0; registered < units; registered++)
         {
-            queue.CallLater(this.SlowTick, 60000, true);
+            queue.CallLater(this.SlowTick, 86400000, true);
         }
         m_SlowTimerCount = units;
     }
