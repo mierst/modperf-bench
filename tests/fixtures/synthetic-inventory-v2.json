@@ -1,0 +1,289 @@
+{
+  "schema": "modperf-bench/results/2",
+  "protocol_version": "2.0",
+  "manifest_sha256": "616f361a0417a0f8a7cc5958f739c5d17f9e85bd2664a424c187451772c340c7",
+  "config": {
+    "note": "synthetic",
+    "hardware_note": "test",
+    "settle_seconds": 1,
+    "window_seconds": 40,
+    "block_seconds": 0.01,
+    "a_prime_tolerance_pct": 10,
+    "model_ns_timer_residency": 0,
+    "b2_k": 500,
+    "b5_units": 1000,
+    "b3_lookups": 100000,
+    "b3_repeats": 5,
+    "b3_entity": "test",
+    "b3_fallback_entity": "test",
+    "b3_slot": "",
+    "b3_attachment": "test",
+    "b3_position": "0 0 0",
+    "benches": [
+      "BASELINE"
+    ],
+    "k_values": [
+      100
+    ],
+    "b2_periods_ms": [
+      0
+    ],
+    "repeats": 3,
+    "max_samples": 2000,
+    "manifest_sha256": "616f361a0417a0f8a7cc5958f739c5d17f9e85bd2664a424c187451772c340c7",
+    "scenario_id": "synthetic",
+    "transition_seconds": 1,
+    "run_self_tests": 1
+  },
+  "clock": {
+    "source": "GetTickTime",
+    "frame_pairing_valid": false,
+    "observer_qualified": false
+  },
+  "benches": [
+    {
+      "id": "BASELINE",
+      "variant": "test",
+      "protocol": "observed_baseline",
+      "mechanism": "synthetic",
+      "units": 100,
+      "period_ms": 0,
+      "replicate": 0,
+      "validity_reasons": [],
+      "verdict": "REQUIRES_ANALYSIS",
+      "windows": {
+        "baseline": {
+          "frames": 800,
+          "blocks": 8,
+          "mean_ms": 10.0,
+          "median_ms": 10.0,
+          "p95_ms": 10.0,
+          "median_fps": 100.0,
+          "elapsed_s": 8.0,
+          "samples_ms": [
+            10.0,
+            10.0,
+            10.0,
+            10.0,
+            10.0,
+            10.0,
+            10.0,
+            10.0
+          ],
+          "sample_frames": [
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100
+          ],
+          "sample_elapsed_s": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "samples_kept": 8,
+          "sample_end_s": [
+            1.0,
+            2.0,
+            3.0,
+            4.0,
+            5.0,
+            6.0,
+            7.0,
+            8.0
+          ],
+          "decimated": false,
+          "timing_source": "entry_wall_clock",
+          "tail_coverage": false
+        }
+      }
+    },
+    {
+      "id": "BASELINE",
+      "variant": "test",
+      "protocol": "observed_baseline",
+      "mechanism": "synthetic",
+      "units": 100,
+      "period_ms": 0,
+      "replicate": 1,
+      "validity_reasons": [],
+      "verdict": "REQUIRES_ANALYSIS",
+      "windows": {
+        "baseline": {
+          "frames": 800,
+          "blocks": 8,
+          "mean_ms": 10.0,
+          "median_ms": 10.0,
+          "p95_ms": 10.0,
+          "median_fps": 100.0,
+          "elapsed_s": 8.0,
+          "samples_ms": [
+            10.0,
+            10.0,
+            10.0,
+            10.0,
+            10.0,
+            10.0,
+            10.0,
+            10.0
+          ],
+          "sample_frames": [
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100
+          ],
+          "sample_elapsed_s": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "samples_kept": 8,
+          "sample_end_s": [
+            1.0,
+            2.0,
+            3.0,
+            4.0,
+            5.0,
+            6.0,
+            7.0,
+            8.0
+          ],
+          "decimated": false,
+          "timing_source": "entry_wall_clock",
+          "tail_coverage": false
+        }
+      }
+    },
+    {
+      "id": "BASELINE",
+      "variant": "test",
+      "protocol": "observed_baseline",
+      "mechanism": "synthetic",
+      "units": 100,
+      "period_ms": 0,
+      "replicate": 2,
+      "validity_reasons": [],
+      "verdict": "REQUIRES_ANALYSIS",
+      "windows": {
+        "baseline": {
+          "frames": 800,
+          "blocks": 8,
+          "mean_ms": 10.0,
+          "median_ms": 10.0,
+          "p95_ms": 10.0,
+          "median_fps": 100.0,
+          "elapsed_s": 8.0,
+          "samples_ms": [
+            10.0,
+            10.0,
+            10.0,
+            10.0,
+            10.0,
+            10.0,
+            10.0,
+            10.0
+          ],
+          "sample_frames": [
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100
+          ],
+          "sample_elapsed_s": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "samples_kept": 8,
+          "sample_end_s": [
+            1.0,
+            2.0,
+            3.0,
+            4.0,
+            5.0,
+            6.0,
+            7.0,
+            8.0
+          ],
+          "decimated": false,
+          "timing_source": "entry_wall_clock",
+          "tail_coverage": false
+        }
+      }
+    },
+    {
+      "id": "B3",
+      "protocol": "paired_loops",
+      "status": "MEASURED",
+      "verdict": "MEASURED",
+      "ok": true,
+      "validity_reasons": [],
+      "lookups": 1000,
+      "repeats": 2,
+      "repeats_per_pair": 1,
+      "pair_count": 2,
+      "total_calls": 2000,
+      "hits": 2000,
+      "control_hits": 2000,
+      "control_loop_ms": 4.0,
+      "measured_loop_ms": 6.0,
+      "per_call_ns_net": 1000.0,
+      "clock_step_ms": 0.001,
+      "quantization_bound_ms": 0.004,
+      "per_call_ns_resolution": 2.0,
+      "resolution_bound_ns_lower": 998.0,
+      "resolution_bound_ns_upper": 1002.0,
+      "resolution_bound_kind": "observed_clock_quantization_only",
+      "pairs": [
+        {
+          "index": 0,
+          "order": "control_lookup",
+          "calls": 1000,
+          "control_ms": 2.0,
+          "lookup_ms": 3.0,
+          "delta_ms": 1.0
+        },
+        {
+          "index": 1,
+          "order": "lookup_control",
+          "calls": 1000,
+          "control_ms": 2.0,
+          "lookup_ms": 3.0,
+          "delta_ms": 1.0
+        }
+      ],
+      "protocol_version": 2,
+      "mechanism": "inventory_lookup",
+      "replicate": 0,
+      "variant": "occupied_slot"
+    }
+  ]
+}

@@ -20,10 +20,9 @@
 //   constant derived from drift. A' is also the only proof that teardown
 //   actually removed the load.
 //
-//   Per-unit cost is the difference of window MEDIANS divided by K. Medians
-//   rather than means because a single scheduler hiccup or an autosave inside
-//   a window moves a mean and not a median, and the quantity being estimated
-//   is the typical frame, not the total.
+//   Ordered, weighted block observations are analyzed offline. All valid
+//   signed contrasts survive pooling; median differences in the log are
+//   diagnostics, not calibrated per-unit prices.
 //
 // AMPLIFICATION
 //   The effects are nanoscale per unit, so the load is applied in bulk (K
@@ -31,7 +30,8 @@
 //   effect visible in a frame-time distribution.
 //
 // TIMING SOURCES
-//   Frame duration: the `timeslice` parameter of MissionServer.OnUpdate.
+//   Entry-to-entry elapsed time: GetGame().GetTickTime(). This float clock
+//   includes waits and is not a CPU service-time measurement.
 //   Wall clock within a frame: GetGame().GetTickTime(), in seconds.
 //   No engine profiler is used; it is stubbed on retail server builds.
 //
@@ -43,6 +43,11 @@ class MPB_Config
     static const string PATH = "$profile:modperf-bench/config.json";
 
     bool   m_Present;
+    string m_ManifestSha256;
+    string m_ScenarioId;
+    int m_Repeats;
+    int m_RunSelfTests;
+    float m_TransitionSeconds;
     string m_Note;
     string m_HardwareNote;
     float  m_SettleSeconds;
@@ -66,6 +71,11 @@ class MPB_Config
     void MPB_Config()
     {
         m_Present = false;
+        m_ManifestSha256 = "";
+        m_ScenarioId = "unspecified";
+        m_Repeats = 3;
+        m_RunSelfTests = 0;
+        m_TransitionSeconds = 2;
         m_Note = "";
         m_HardwareNote = "";
         m_SettleSeconds = 120.0;
@@ -75,17 +85,17 @@ class MPB_Config
         // fast server.
         m_BlockSeconds = 0.01;
         m_APrimeTolerancePct = 10.0;
-        // Reference constant for B1 only. Every other bench reports what it
-        // measured with no reference number attached -- inventing one would
-        // turn "we have not modelled this yet" into a false pass.
-        m_ModelNsTimerResidency = 140.0;
+        // Legacy config field retained for complete provenance only. Native
+        // Timer and due CallLater are different mechanisms; no v2 bench uses
+        // an unqualified universal reference for either one.
+        m_ModelNsTimerResidency = 0;
         m_B2K = 500;
         // B5 is amplified like every other bench: one accumulator step or one
         // dormant timer is below the noise floor by orders of magnitude.
         m_B5Units = 1000;
         m_B3Lookups = 100000;
-        // Repeats of the control/measure pair; the median is reported.
-        m_B3Repeats = 5;
+        // Total repeat amplification, partitioned into balanced pairs by B3.
+        m_B3Repeats = 40;
         m_B3Entity = "PlateCarrierVest";
         m_B3FallbackEntity = "PlateCarrierVest";
         // Empty slot name means "discover one from the spawned entity".
@@ -111,6 +121,11 @@ class MPB_Config
         }
         m_Present = true;
 
+        m_ManifestSha256 = MPB_Json.GetString(document, "manifest_sha256", "");
+        m_ScenarioId = MPB_Json.GetString(document, "scenario_id", "unspecified");
+        m_Repeats = MPB_Json.GetInt(document, "repeats", 3);
+        m_RunSelfTests = MPB_Json.GetInt(document, "run_self_tests", 0);
+        m_TransitionSeconds = MPB_Json.GetFloat(document, "transition_seconds", 2);
         m_Note = MPB_Json.GetString(document, "note", "");
         m_HardwareNote = MPB_Json.GetString(document, "hardware_note", "");
         m_SettleSeconds = MPB_Json.GetFloat(document, "settle_seconds", m_SettleSeconds);
@@ -130,6 +145,7 @@ class MPB_Config
 
         if (!MPB_Json.GetStringArray(document, "benches", m_Benches))
         {
+            m_Benches.Insert("B0");
             m_Benches.Insert("B1");
             m_Benches.Insert("B2");
             m_Benches.Insert("B3");
@@ -169,6 +185,25 @@ class MPB_Config
         {
             m_BlockSeconds = m_WindowSeconds / 10.0;
         }
+        if (m_Repeats < 1 || m_Repeats > 20) m_Repeats = 3;
+        if (m_TransitionSeconds < 0 || m_TransitionSeconds > 120) m_TransitionSeconds = 2;
+        if (m_B2K < 1 || m_B2K > 10000) m_B2K = 500;
+        if (m_B5Units < 1 || m_B5Units > 10000) m_B5Units = 1000;
+        if (m_SettleSeconds > 600) m_SettleSeconds = 600;
+        if (m_WindowSeconds > 600) m_WindowSeconds = 600;
+        if (m_APrimeTolerancePct < 0 || m_APrimeTolerancePct > 100) m_APrimeTolerancePct = 10;
+        int boundIndex;
+        if (m_KValues.Count() > 20) m_KValues.Resize(20);
+        if (m_B2Periods.Count() > 20) m_B2Periods.Resize(20);
+        for (boundIndex = 0; boundIndex < m_KValues.Count(); boundIndex++)
+        {
+            if (m_KValues.Get(boundIndex) < 1 || m_KValues.Get(boundIndex) > 10000) m_KValues.Set(boundIndex, 100);
+        }
+        int periodBoundIndex;
+        for (periodBoundIndex = 0; periodBoundIndex < m_B2Periods.Count(); periodBoundIndex++)
+        {
+            if (m_B2Periods.Get(periodBoundIndex) < 0 || m_B2Periods.Get(periodBoundIndex) > 86400000) m_B2Periods.Set(periodBoundIndex, 1000);
+        }
         return true;
     }
 
@@ -198,7 +233,21 @@ class MPB_Config
         text = text + "    \"b2_k\": " + m_B2K + ",\n";
         text = text + "    \"b5_units\": " + m_B5Units + ",\n";
         text = text + "    \"b3_lookups\": " + m_B3Lookups + ",\n";
-        text = text + "    \"b3_repeats\": " + m_B3Repeats + "\n";
+        text = text + "    \"b3_repeats\": " + m_B3Repeats + ",\n";
+        text = text + "    \"b3_entity\": " + MPB_Fmt.Quoted(m_B3Entity) + ",\n";
+        text = text + "    \"b3_fallback_entity\": " + MPB_Fmt.Quoted(m_B3FallbackEntity) + ",\n";
+        text = text + "    \"b3_slot\": " + MPB_Fmt.Quoted(m_B3Slot) + ",\n";
+        text = text + "    \"b3_attachment\": " + MPB_Fmt.Quoted(m_B3Attachment) + ",\n";
+        text = text + "    \"b3_position\": " + MPB_Fmt.Quoted(m_B3Position) + ",\n";
+        text = text + "    \"manifest_sha256\": " + MPB_Fmt.Quoted(m_ManifestSha256) + ",\n";
+        text = text + "    \"scenario_id\": " + MPB_Fmt.Quoted(m_ScenarioId) + ",\n";
+        text = text + "    \"repeats\": " + m_Repeats + ",\n";
+        text = text + "    \"run_self_tests\": " + m_RunSelfTests + ",\n";
+        text = text + "    \"transition_seconds\": " + MPB_Fmt.Dec(m_TransitionSeconds, 3) + ",\n";
+        text = text + "    \"max_samples\": 20000,\n";
+        text = text + "    \"benches\": " + MPB_Fmt.StringArray(m_Benches) + ",\n";
+        text = text + "    \"k_values\": " + MPB_Fmt.IntArray(m_KValues) + ",\n";
+        text = text + "    \"b2_periods_ms\": " + MPB_Fmt.IntArray(m_B2Periods) + "\n";
         text = text + "  },";
         return text;
     }
@@ -216,6 +265,14 @@ class MPB_Run
     static const int KIND_ACCUMULATOR = 2;
     static const int KIND_SLOW_TIMER = 3;
     static const int KIND_INVENTORY = 4;
+    static const int KIND_NATIVE_TIMER = 5;
+    static const int KIND_BASELINE = 6;
+    int m_Replicate;
+    string m_BaseJson;
+    string m_TreatJson;
+    string m_RecoverJson;
+    string m_InvalidReason;
+    string m_Mechanism;
 
     string m_BenchId;
     string m_Variant;
@@ -269,10 +326,17 @@ class MPB_Run
         m_ModelNs = modelNs;
         m_Verdict = "NOT_RUN";
         m_APrimeOk = false;
+        m_Mechanism = "calllater_due";
+        if (kind == KIND_NATIVE_TIMER) m_Mechanism = "native_timer_residency";
+        if (kind == KIND_BASELINE) m_Mechanism = "observed_host_baseline";
+        if (kind == KIND_ACCUMULATOR) m_Mechanism = "accumulator";
+        if (kind == KIND_SLOW_TIMER) m_Mechanism = "calllater_dormant";
+        if (kind == KIND_TIMER && periodMs > 0) m_Mechanism = "calllater_periodic";
     }
 
     void CaptureBaseline(MPB_FrameClock clock)
     {
+        m_BaseJson = clock.SnapshotJson();
         m_BaseMeanMs = clock.MeanMs();
         m_BaseMedianMs = clock.MedianMs();
         m_BaseP95Ms = clock.P95Ms();
@@ -286,6 +350,7 @@ class MPB_Run
 
     void CaptureTreatment(MPB_FrameClock clock)
     {
+        m_TreatJson = clock.SnapshotJson();
         m_TreatMeanMs = clock.MeanMs();
         m_TreatMedianMs = clock.MedianMs();
         m_TreatP95Ms = clock.P95Ms();
@@ -296,6 +361,7 @@ class MPB_Run
 
     void CaptureRecovery(MPB_FrameClock clock)
     {
+        m_RecoverJson = clock.SnapshotJson();
         m_RecoverMeanMs = clock.MeanMs();
         m_RecoverMedianMs = clock.MedianMs();
         m_RecoverP95Ms = clock.P95Ms();
@@ -310,148 +376,61 @@ class MPB_Run
     {
         m_DeltaMs = m_TreatMedianMs - m_BaseMedianMs;
         m_DriftMs = m_RecoverMedianMs - m_BaseMedianMs;
-
         m_DriftPct = 0;
-        if (m_BaseMedianMs > 0)
-        {
-            m_DriftPct = (Math.AbsFloat(m_DriftMs) / m_BaseMedianMs) * 100.0;
-        }
-
-        int divisor = m_Units;
-        if (divisor <= 0)
-        {
-            divisor = 1;
-        }
-        m_PerUnitNs = (m_DeltaMs * 1000000.0) / divisor;
-
-        // The noise floor is the LARGER of two things, because either alone
-        // can be fooled:
-        //
-        //   between-window drift -- how far the box moved between two windows
-        //     that carried identical load. On its own it collapses to exactly
-        //     zero whenever A and A' happen to land on the same quantized
-        //     median, which would then let any difference count as real.
-        //
-        //   the baseline median's own standard error -- the precision of the
-        //     estimate itself. This does not collapse, so it is the floor that
-        //     holds when drift is zero.
-        float floorMs = Math.AbsFloat(m_DriftMs);
-        if (m_BaseStdErrMs > floorMs)
-        {
-            floorMs = m_BaseStdErrMs;
-        }
-        m_NoiseNs = (floorMs * 1000000.0) / divisor;
-
-        m_APrimeOk = m_DriftPct <= tolerancePct;
+        if (m_BaseMedianMs > 0) m_DriftPct = (Math.AbsFloat(m_DriftMs) / m_BaseMedianMs) * 100.0;
+        m_APrimeOk = m_BaseFrames > 0 && m_TreatFrames > 0 && m_RecoverFrames > 0 && m_DriftPct <= tolerancePct;
         if (!m_APrimeOk)
         {
             m_Verdict = "INVALID_A_PRIME";
             return;
         }
-
-        // A margin, not a bare comparison. A delta that merely edges past its
-        // own noise floor is exactly what a noise floor is bad at
-        // distinguishing, and this tool's output is meant to be usable as
-        // evidence -- so an effect has to clear the floor by a factor before
-        // it is called a measurement at all.
-        if (Math.AbsFloat(m_DeltaMs) <= floorMs * SIGNIFICANCE_FACTOR)
-        {
-            m_Verdict = "BELOW_NOISE";
-            return;
-        }
-
-        // A load can only add work. A treatment window that measured FASTER
-        // than its baseline by more than the noise floor means something other
-        // than the load moved the number, so the run cannot be read as a
-        // measurement of the load -- and it must not be reported as a model
-        // deviation either, which is what would happen if this fell through
-        // to the comparison below.
-        if (m_DeltaMs < 0)
-        {
-            m_Verdict = "NEGATIVE_DELTA";
-            return;
-        }
-
-        if (m_ModelNs > 0)
-        {
-            float allowed = m_ModelNs * 0.2;
-            if (Math.AbsFloat(m_PerUnitNs - m_ModelNs) <= allowed)
-            {
-                m_Verdict = "WITHIN_20PCT";
-            }
-            else
-            {
-                m_Verdict = "DRIFT";
-            }
-            return;
-        }
-
-        m_Verdict = "MEASURED";
+        // Preserve every signed contrast. Filtering negative or small effects
+        // before pooling repetitions would bias calibration upward.
+        m_PerUnitNs = 0;
+        m_NoiseNs = 0;
+        m_Verdict = "REQUIRES_ANALYSIS";
     }
 
     string SummaryText()
     {
-        string text = m_BenchId + " " + m_Variant;
+        string text = "verdict=" + m_Verdict + " " + m_BenchId;
+        text = text + " " + m_Variant;
         text = text + " base_med_ms=" + MPB_Fmt.Ms(m_BaseMedianMs);
         text = text + " treat_med_ms=" + MPB_Fmt.Ms(m_TreatMedianMs);
         text = text + " rec_med_ms=" + MPB_Fmt.Ms(m_RecoverMedianMs);
         text = text + " base_fps=" + MPB_Fmt.Fps(m_BaseFps);
         text = text + " treat_fps=" + MPB_Fmt.Fps(m_TreatFps);
-        text = text + " per_unit_ns=" + MPB_Fmt.Ns(m_PerUnitNs);
-        text = text + " noise_ns=" + MPB_Fmt.Ns(m_NoiseNs);
-        if (m_ModelNs > 0)
-        {
-            text = text + " model_ns=" + MPB_Fmt.Ns(m_ModelNs);
-        }
+        text = text + " cost=pending_offline_analysis";
         text = text + " a_prime_drift_pct=" + MPB_Fmt.Dec(m_DriftPct, 2);
         text = text + " verdict=" + m_Verdict;
         return text;
     }
 
-    private string WindowJson(string label, int frames, int blocks, float meanMs, float medianMs, float p95Ms, float fps)
-    {
-        string text = "        \"" + label + "\": { ";
-        text = text + "\"frames\": " + frames + ", ";
-        text = text + "\"blocks\": " + blocks + ", ";
-        text = text + "\"mean_ms\": " + MPB_Fmt.Ms(meanMs) + ", ";
-        text = text + "\"median_ms\": " + MPB_Fmt.Ms(medianMs) + ", ";
-        text = text + "\"p95_ms\": " + MPB_Fmt.Ms(p95Ms) + ", ";
-        text = text + "\"median_fps\": " + MPB_Fmt.Fps(fps);
-        text = text + " }";
-        return text;
-    }
-
     string ToJsonObject()
     {
-        string modelText = "null";
-        if (m_ModelNs > 0)
-        {
-            modelText = MPB_Fmt.Ns(m_ModelNs);
-        }
-
+        string protocol = "a_b_a_prime";
+        if (m_Kind == KIND_BASELINE) protocol = "observed_baseline";
         string text = "    {\n";
         text = text + "      \"id\": " + MPB_Fmt.Quoted(m_BenchId) + ",\n";
         text = text + "      \"variant\": " + MPB_Fmt.Quoted(m_Variant) + ",\n";
-        text = text + "      \"protocol\": \"a_b_a_prime\",\n";
+        text = text + "      \"protocol\": " + MPB_Fmt.Quoted(protocol) + ",\n";
+        text = text + "      \"mechanism\": " + MPB_Fmt.Quoted(m_Mechanism) + ",\n";
+        text = text + "      \"replicate\": " + m_Replicate + ",\n";
         text = text + "      \"units\": " + m_Units + ",\n";
         text = text + "      \"period_ms\": " + m_PeriodMs + ",\n";
-        text = text + "      \"block_target_ms\": " + MPB_Fmt.Ms(m_BlockTargetMs) + ",\n";
-        text = text + "      \"mean_block_frames\": " + MPB_Fmt.Dec(m_MeanBlockFrames, 1) + ",\n";
-        text = text + "      \"windows\": {\n";
-        text = text + WindowJson("baseline", m_BaseFrames, m_BaseBlocks, m_BaseMeanMs, m_BaseMedianMs, m_BaseP95Ms, m_BaseFps) + ",\n";
-        text = text + WindowJson("treatment", m_TreatFrames, m_TreatBlocks, m_TreatMeanMs, m_TreatMedianMs, m_TreatP95Ms, m_TreatFps) + ",\n";
-        text = text + WindowJson("recovery", m_RecoverFrames, m_RecoverBlocks, m_RecoverMeanMs, m_RecoverMedianMs, m_RecoverP95Ms, m_RecoverFps) + "\n";
-        text = text + "      },\n";
-        text = text + "      \"delta_median_ms\": " + MPB_Fmt.Ms(m_DeltaMs) + ",\n";
-        text = text + "      \"baseline_median_stderr_ms\": " + MPB_Fmt.Dec(m_BaseStdErrMs, 6) + ",\n";
-        text = text + "      \"a_prime_drift_ms\": " + MPB_Fmt.Ms(m_DriftMs) + ",\n";
-        text = text + "      \"a_prime_drift_pct\": " + MPB_Fmt.Dec(m_DriftPct, 2) + ",\n";
+        text = text + "      \"validity_reasons\": [";
+        if (m_InvalidReason != "") text = text + MPB_Fmt.Quoted(m_InvalidReason);
+        text = text + "],\n      \"windows\": {";
+        if (m_BaseJson != "") text = text + "\"baseline\": " + m_BaseJson;
+        if (m_TreatJson != "") text = text + ",\"treatment\": " + m_TreatJson;
+        if (m_RecoverJson != "") text = text + ",\"recovery\": " + m_RecoverJson;
+        text = text + "},\n";
+        text = text + "      \"delta_median_ms\": " + MPB_Fmt.Dec(m_DeltaMs, 6) + ",\n";
+        text = text + "      \"a_prime_drift_pct\": " + MPB_Fmt.Dec(m_DriftPct, 3) + ",\n";
         text = text + "      \"a_prime_ok\": " + MPB_Fmt.Bool(m_APrimeOk) + ",\n";
-        text = text + "      \"per_unit_ns\": " + MPB_Fmt.Ns(m_PerUnitNs) + ",\n";
-        text = text + "      \"noise_ns\": " + MPB_Fmt.Ns(m_NoiseNs) + ",\n";
-        text = text + "      \"model_ns\": " + modelText + ",\n";
-        text = text + "      \"verdict\": " + MPB_Fmt.Quoted(m_Verdict) + "\n";
-        text = text + "    }";
+        text = text + "      \"per_unit_ns\": null,\n";
+        text = text + "      \"model_ns\": null,\n";
+        text = text + "      \"verdict\": " + MPB_Fmt.Quoted(m_Verdict) + "\n    }";
         return text;
     }
 }
@@ -466,18 +445,24 @@ class MPB_Runner
     static const int PHASE_TREAT          = 3;
     static const int PHASE_RECOVER        = 4;
     static const int PHASE_DONE           = 5;
+    static const int PHASE_TRANSITION = 8;
+    int m_NextPhase;
+    float m_LastWall;
+    bool m_SkipNextInterval;
+    bool m_SelfTestsPassed;
 
     // How long each self-check stage runs. Short: it only has to count, not
     // resolve a cost.
     static const float SELFCHECK_SECONDS = 1.0;
 
-    static const string SUITE = "v1";
-    static const string MOD_VERSION = "1.0.0";
+    static const string SUITE = "v2";
+    static const string MOD_VERSION = "2.0.0";
 
     ref MPB_Config          m_Config;
     ref MPB_Report          m_Reporter;
     ref MPB_FrameClock      m_Clock;
     ref MPB_TimerLoad       m_TimerLoad;
+    ref MPB_NativeTimerLoad m_NativeTimerLoad;
     ref MPB_AccumulatorLoad m_AccumulatorLoad;
     ref MPB_InventoryLookup m_InventoryBench;
     ref array<ref MPB_Run>  m_Runs;
@@ -510,6 +495,7 @@ class MPB_Runner
         m_Reporter = new MPB_Report();
         m_Clock = new MPB_FrameClock();
         m_TimerLoad = new MPB_TimerLoad();
+        m_NativeTimerLoad = new MPB_NativeTimerLoad();
         m_AccumulatorLoad = new MPB_AccumulatorLoad();
         m_InventoryBench = new MPB_InventoryLookup();
         m_Runs = new array<ref MPB_Run>();
@@ -552,6 +538,14 @@ class MPB_Runner
         m_DayzVersion = version;
         m_StartedUtc = MPB_Fmt.UtcIso();
 
+        m_SelfTestsPassed = true;
+        if (m_Config.m_RunSelfTests == 1) m_SelfTestsPassed = MPB_SelfTests.Run();
+        if (!m_SelfTestsPassed)
+        {
+            m_Reporter.Say("INVALID_SELF_TEST suite stopped");
+            Finish();
+            return;
+        }
         BuildRunList();
         if (m_Runs.Count() == 0)
         {
@@ -577,43 +571,67 @@ class MPB_Runner
         m_PhaseSeconds = 0;
         // The settle window is also the suite's own free-run reference. It
         // costs nothing to record and it is the number an operator reads first.
-        m_Clock.Start();
+        StartClock();
     }
 
     private void BuildRunList()
     {
-        int index;
-
-        if (m_Config.WantsBench("B1"))
+        int repeatIndex;
+        for (repeatIndex = 0; repeatIndex < m_Config.m_Repeats; repeatIndex++)
         {
-            for (index = 0; index < m_Config.m_KValues.Count(); index++)
+            int first = m_Runs.Count();
+            if (m_Config.WantsBench("BASELINE")) m_Runs.Insert(new MPB_Run("BASELINE", "host", MPB_Run.KIND_BASELINE, 1, 0, 0));
+            int kIndex;
+            for (kIndex = 0; kIndex < m_Config.m_KValues.Count() && kIndex < 20; kIndex++)
             {
-                int kValue = m_Config.m_KValues.Get(index);
-                m_Runs.Insert(new MPB_Run("B1", "K=" + kValue + " period=0ms", MPB_Run.KIND_TIMER, kValue, 0, m_Config.m_ModelNsTimerResidency));
+                int k = m_Config.m_KValues.Get(kIndex);
+                if (m_Config.WantsBench("B0")) m_Runs.Insert(new MPB_Run("B0", "native Timer K=" + k, MPB_Run.KIND_NATIVE_TIMER, k, 86400000, 0));
+                if (m_Config.WantsBench("B1")) m_Runs.Insert(new MPB_Run("B1", "due CallLater K=" + k, MPB_Run.KIND_TIMER, k, 0, 0));
             }
-        }
-
-        if (m_Config.WantsBench("B2"))
-        {
             int periodIndex;
-            for (periodIndex = 0; periodIndex < m_Config.m_B2Periods.Count(); periodIndex++)
+            for (periodIndex = 0; periodIndex < m_Config.m_B2Periods.Count() && periodIndex < 20; periodIndex++)
             {
-                int periodValue = m_Config.m_B2Periods.Get(periodIndex);
-                m_Runs.Insert(new MPB_Run("B2", "K=" + m_Config.m_B2K + " period=" + periodValue + "ms", MPB_Run.KIND_TIMER, m_Config.m_B2K, periodValue, 0));
+                int period = m_Config.m_B2Periods.Get(periodIndex);
+                if (m_Config.WantsBench("B2")) m_Runs.Insert(new MPB_Run("B2", "period=" + period, MPB_Run.KIND_TIMER, m_Config.m_B2K, period, 0));
+            }
+            if (m_Config.WantsBench("B3")) m_Runs.Insert(new MPB_Run("B3", "inventory", MPB_Run.KIND_INVENTORY, m_Config.m_B3Lookups, 0, 0));
+            if (m_Config.WantsBench("B5"))
+            {
+                m_Runs.Insert(new MPB_Run("B5", "accumulator", MPB_Run.KIND_ACCUMULATOR, m_Config.m_B5Units, 0, 0));
+                m_Runs.Insert(new MPB_Run("B5", "CallLater 24h", MPB_Run.KIND_SLOW_TIMER, m_Config.m_B5Units, 86400000, 0));
+            }
+            int assignIndex;
+            for (assignIndex = first; assignIndex < m_Runs.Count(); assignIndex++) m_Runs.Get(assignIndex).m_Replicate = repeatIndex;
+            // Reverse each alternate ladder to counterbalance machine drift.
+            if (repeatIndex % 2 == 1)
+            {
+                int left = first;
+                int right = m_Runs.Count() - 1;
+                while (left < right)
+                {
+                    MPB_Run swapRun = m_Runs.Get(left);
+                    m_Runs.Set(left, m_Runs.Get(right));
+                    m_Runs.Set(right, swapRun);
+                    left++;
+                    right--;
+                }
             }
         }
+    }
 
-        if (m_Config.WantsBench("B3"))
-        {
-            m_Runs.Insert(new MPB_Run("B3", "n=" + m_Config.m_B3Lookups, MPB_Run.KIND_INVENTORY, m_Config.m_B3Lookups, 0, 0));
-        }
+    private void StartClock()
+    {
+        m_Clock.Start();
+        m_LastWall = GetGame().GetTickTime();
+        m_SkipNextInterval = true;
+    }
 
-        if (m_Config.WantsBench("B5"))
-        {
-            int b5Units = m_Config.m_B5Units;
-            m_Runs.Insert(new MPB_Run("B5", "accumulator x" + b5Units, MPB_Run.KIND_ACCUMULATOR, b5Units, 0, 0));
-            m_Runs.Insert(new MPB_Run("B5", "slow_timer_60s x" + b5Units, MPB_Run.KIND_SLOW_TIMER, b5Units, 60000, 0));
-        }
+    private void TransitionTo(int phase)
+    {
+        m_Clock.Stop();
+        m_NextPhase = phase;
+        m_Phase = PHASE_TRANSITION;
+        m_PhaseSeconds = 0;
     }
 
     void MPB_OnUpdate(float timeslice)
@@ -628,8 +646,28 @@ class MPB_Runner
             return;
         }
 
-        m_Clock.Sample(timeslice);
-        m_PhaseSeconds = m_PhaseSeconds + timeslice;
+        float nowWall = GetGame().GetTickTime();
+        float wallDelta = nowWall - m_LastWall;
+        m_LastWall = nowWall;
+        if (wallDelta < 0) wallDelta = 0;
+        m_PhaseSeconds = m_PhaseSeconds + wallDelta;
+        if (m_Phase == PHASE_TRANSITION)
+        {
+            if (m_PhaseSeconds >= m_Config.m_TransitionSeconds)
+            {
+                m_Phase = m_NextPhase;
+                m_PhaseSeconds = 0;
+                StartClock();
+            }
+            return;
+        }
+        if (m_SkipNextInterval)
+        {
+            m_SkipNextInterval = false;
+            m_PhaseSeconds = 0;
+            return;
+        }
+        m_Clock.Sample(wallDelta);
 
         if (m_Phase == PHASE_SETTLE)
         {
@@ -638,7 +676,8 @@ class MPB_Runner
                 m_SuiteBaseMedianMs = m_Clock.MedianMs();
                 m_SuiteBaseFps = m_Clock.MedianFps();
                 m_Reporter.Say("SETTLED " + m_Clock.SummaryText());
-                StartSelfCheckOne();
+                if (m_Config.WantsBench("B1") || m_Config.WantsBench("B2") || m_Config.WantsBench("B5")) StartSelfCheckOne();
+                else StartNextRun();
             }
             return;
         }
@@ -680,10 +719,16 @@ class MPB_Runner
             MPB_Run baseRun = m_Runs.Get(m_RunIndex);
             baseRun.CaptureBaseline(m_Clock);
             m_Reporter.Trace(baseRun.m_BenchId + " " + baseRun.m_Variant + " A  " + m_Clock.SummaryText());
+            if (baseRun.m_Kind == MPB_Run.KIND_BASELINE)
+            {
+                baseRun.m_Verdict = "OBSERVED";
+                m_Reporter.AddBenchBlock(baseRun.ToJsonObject());
+                m_Reporter.Say(baseRun.SummaryText());
+                StartNextRun();
+                return;
+            }
             ApplyLoad(baseRun);
-            m_Phase = PHASE_TREAT;
-            m_PhaseSeconds = 0;
-            m_Clock.Start();
+            TransitionTo(PHASE_TREAT);
             return;
         }
 
@@ -692,10 +737,9 @@ class MPB_Runner
             MPB_Run treatRun = m_Runs.Get(m_RunIndex);
             treatRun.CaptureTreatment(m_Clock);
             m_Reporter.Trace(treatRun.m_BenchId + " " + treatRun.m_Variant + " B  " + m_Clock.SummaryText());
+            if (treatRun.m_Kind == MPB_Run.KIND_NATIVE_TIMER && m_NativeTimerLoad.FireCount() > 0) treatRun.m_InvalidReason = "native_timer_fired";
             RemoveLoad(treatRun);
-            m_Phase = PHASE_RECOVER;
-            m_PhaseSeconds = 0;
-            m_Clock.Start();
+            TransitionTo(PHASE_RECOVER);
             return;
         }
 
@@ -705,6 +749,7 @@ class MPB_Runner
             recoverRun.CaptureRecovery(m_Clock);
             m_Reporter.Trace(recoverRun.m_BenchId + " " + recoverRun.m_Variant + " A' " + m_Clock.SummaryText());
             recoverRun.Conclude(m_Config.m_APrimeTolerancePct);
+            if (recoverRun.m_InvalidReason != "") recoverRun.m_Verdict = "INVALID_TIMER_FIRED";
             m_Reporter.Say(recoverRun.SummaryText());
             m_Reporter.AddBenchBlock(recoverRun.ToJsonObject());
             StartNextRun();
@@ -740,15 +785,16 @@ class MPB_Runner
                 m_SelfCheckK = m_Config.m_KValues.Get(scanIndex);
             }
         }
-        if (m_SelfCheckK <= 0)
-        {
-            m_SelfCheckK = 100;
-        }
+        if (m_Config.WantsBench("B2") && m_Config.m_B2K > m_SelfCheckK) m_SelfCheckK = m_Config.m_B2K;
+        if (m_Config.WantsBench("B5") && m_Config.m_B5Units > m_SelfCheckK) m_SelfCheckK = m_Config.m_B5Units;
+        // K=1 cannot distinguish independently registered entries from a
+        // deduplicating queue, even if the selected treatment itself uses 1.
+        if (m_SelfCheckK < 2) m_SelfCheckK = 2;
 
         m_TimerLoad.ApplyCounted(1, 0);
         m_Phase = PHASE_SELFCHECK_ONE;
         m_PhaseSeconds = 0;
-        m_Clock.Start();
+        StartClock();
     }
 
     private void StartSelfCheckMany()
@@ -756,7 +802,7 @@ class MPB_Runner
         m_TimerLoad.ApplyCounted(m_SelfCheckK, 0);
         m_Phase = PHASE_SELFCHECK_MANY;
         m_PhaseSeconds = 0;
-        m_Clock.Start();
+        StartClock();
     }
 
     private void FinishSelfCheck()
@@ -826,6 +872,15 @@ class MPB_Runner
         }
 
         MPB_Run run = m_Runs.Get(m_RunIndex);
+        if ((run.m_Kind == MPB_Run.KIND_TIMER || run.m_Kind == MPB_Run.KIND_SLOW_TIMER) && m_SelfCheckVerdict != "K_ENTRIES_CONFIRMED")
+        {
+            run.m_Verdict = "INVALID_MULTIPLICITY";
+            run.m_InvalidReason = m_SelfCheckVerdict;
+            m_Reporter.AddBenchBlock(run.ToJsonObject());
+            m_Reporter.Say(run.SummaryText());
+            StartNextRun();
+            return;
+        }
 
         if (run.m_Kind == MPB_Run.KIND_INVENTORY)
         {
@@ -849,19 +904,24 @@ class MPB_Runner
         runLine = runLine + " " + run.m_BenchId;
         runLine = runLine + " " + run.m_Variant;
         m_Reporter.Trace(runLine);
-        m_Phase = PHASE_BASE;
-        m_PhaseSeconds = 0;
-        m_Clock.Start();
+        TransitionTo(PHASE_BASE);
     }
 
     private void RunInventoryBench()
     {
+        m_InventoryBench.m_Replicate = m_Runs.Get(m_RunIndex).m_Replicate;
         vector position = m_Config.m_B3Position.ToVector();
         m_InventoryBench.Run(m_Config.m_B3Entity, m_Config.m_B3FallbackEntity, m_Config.m_B3Slot, m_Config.m_B3Attachment, m_Config.m_B3Lookups, m_Config.m_B3Repeats, position);
     }
 
     private void ApplyLoad(MPB_Run run)
     {
+        if (run.m_Kind == MPB_Run.KIND_NATIVE_TIMER)
+        {
+            m_NativeTimerLoad.Apply(run.m_Units);
+            if (m_NativeTimerLoad.ActiveCount() != run.m_Units) run.m_InvalidReason = "native_timer_registration_failed";
+            return;
+        }
         if (run.m_Kind == MPB_Run.KIND_TIMER)
         {
             m_TimerLoad.Apply(run.m_Units, run.m_PeriodMs);
@@ -881,6 +941,11 @@ class MPB_Runner
 
     private void RemoveLoad(MPB_Run run)
     {
+        if (run.m_Kind == MPB_Run.KIND_NATIVE_TIMER)
+        {
+            m_NativeTimerLoad.Remove();
+            return;
+        }
         if (run.m_Kind == MPB_Run.KIND_TIMER)
         {
             m_TimerLoad.Remove();
@@ -894,6 +959,7 @@ class MPB_Runner
         // Belt and braces: nothing this mod registered may outlive the suite,
         // or the server it was measuring keeps paying for the measurement.
         m_TimerLoad.Remove();
+        m_NativeTimerLoad.Remove();
         m_TimerLoad.RemoveCounted();
         m_AccumulatorLoad.RemoveAll();
 
@@ -912,7 +978,10 @@ class MPB_Runner
 
     private string BuildHeaderJson()
     {
-        string text = "  \"schema\": \"modperf-bench/results/1\",\n";
+        string text = "  \"schema\": \"modperf-bench/results/2\",\n";
+        text = text + "  \"protocol_version\": \"2.0\",\n";
+        text = text + "  \"manifest_sha256\": " + MPB_Fmt.Quoted(m_Config.m_ManifestSha256) + ",\n";
+        text = text + "  \"clock\": {\"source\": \"GetTickTime\", \"frame_pairing_valid\": false, \"observer_qualified\": false},\n";
         text = text + "  \"suite\": " + MPB_Fmt.Quoted(SUITE) + ",\n";
         text = text + "  \"mod_version\": " + MPB_Fmt.Quoted(MOD_VERSION) + ",\n";
         text = text + "  \"dayz_version\": " + MPB_Fmt.Quoted(m_DayzVersion) + ",\n";

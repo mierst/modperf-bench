@@ -1,0 +1,561 @@
+{
+  "schema": "modperf-bench/results/2",
+  "protocol_version": "2.0",
+  "manifest_sha256": "616f361a0417a0f8a7cc5958f739c5d17f9e85bd2664a424c187451772c340c7",
+  "config": {
+    "note": "synthetic",
+    "hardware_note": "test",
+    "settle_seconds": 1,
+    "window_seconds": 40,
+    "block_seconds": 0.01,
+    "a_prime_tolerance_pct": 10,
+    "model_ns_timer_residency": 0,
+    "b2_k": 500,
+    "b5_units": 1000,
+    "b3_lookups": 100000,
+    "b3_repeats": 5,
+    "b3_entity": "test",
+    "b3_fallback_entity": "test",
+    "b3_slot": "",
+    "b3_attachment": "test",
+    "b3_position": "0 0 0",
+    "benches": [
+      "BASELINE"
+    ],
+    "k_values": [
+      100
+    ],
+    "b2_periods_ms": [
+      0
+    ],
+    "repeats": 3,
+    "max_samples": 2000,
+    "manifest_sha256": "616f361a0417a0f8a7cc5958f739c5d17f9e85bd2664a424c187451772c340c7",
+    "scenario_id": "synthetic",
+    "transition_seconds": 1,
+    "run_self_tests": 1
+  },
+  "clock": {
+    "source": "GetTickTime",
+    "frame_pairing_valid": false,
+    "observer_qualified": false
+  },
+  "benches": [
+    {
+      "id": "B1",
+      "variant": "test",
+      "protocol": "a_b_a_prime",
+      "mechanism": "synthetic",
+      "units": 100,
+      "period_ms": 0,
+      "replicate": 0,
+      "validity_reasons": [],
+      "verdict": "REQUIRES_ANALYSIS",
+      "windows": {
+        "baseline": {
+          "frames": 800,
+          "blocks": 8,
+          "mean_ms": 10.0,
+          "median_ms": 10.0,
+          "p95_ms": 10.0,
+          "median_fps": 100.0,
+          "elapsed_s": 8.0,
+          "samples_ms": [
+            10.0,
+            10.0,
+            10.0,
+            10.0,
+            10.0,
+            10.0,
+            10.0,
+            10.0
+          ],
+          "sample_frames": [
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100
+          ],
+          "sample_elapsed_s": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "samples_kept": 8,
+          "sample_end_s": [
+            1.0,
+            2.0,
+            3.0,
+            4.0,
+            5.0,
+            6.0,
+            7.0,
+            8.0
+          ],
+          "decimated": false,
+          "timing_source": "entry_wall_clock",
+          "tail_coverage": false
+        },
+        "treatment": {
+          "frames": 800,
+          "blocks": 8,
+          "mean_ms": 12.0,
+          "median_ms": 12.0,
+          "p95_ms": 12.0,
+          "median_fps": 83.33333333333333,
+          "elapsed_s": 9.6,
+          "samples_ms": [
+            12.0,
+            12.0,
+            12.0,
+            12.0,
+            12.0,
+            12.0,
+            12.0,
+            12.0
+          ],
+          "sample_frames": [
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100
+          ],
+          "sample_elapsed_s": [
+            1.2,
+            1.2,
+            1.2,
+            1.2,
+            1.2,
+            1.2,
+            1.2,
+            1.2
+          ],
+          "samples_kept": 8,
+          "sample_end_s": [
+            1.2,
+            2.4,
+            3.5999999999999996,
+            4.8,
+            6.0,
+            7.2,
+            8.4,
+            9.6
+          ],
+          "decimated": false,
+          "timing_source": "entry_wall_clock",
+          "tail_coverage": false
+        },
+        "recovery": {
+          "frames": 800,
+          "blocks": 8,
+          "mean_ms": 10.0,
+          "median_ms": 10.0,
+          "p95_ms": 10.0,
+          "median_fps": 100.0,
+          "elapsed_s": 8.0,
+          "samples_ms": [
+            10.0,
+            10.0,
+            10.0,
+            10.0,
+            10.0,
+            10.0,
+            10.0,
+            10.0
+          ],
+          "sample_frames": [
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100
+          ],
+          "sample_elapsed_s": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "samples_kept": 8,
+          "sample_end_s": [
+            1.0,
+            2.0,
+            3.0,
+            4.0,
+            5.0,
+            6.0,
+            7.0,
+            8.0
+          ],
+          "decimated": false,
+          "timing_source": "entry_wall_clock",
+          "tail_coverage": false
+        }
+      }
+    },
+    {
+      "id": "B1",
+      "variant": "test",
+      "protocol": "a_b_a_prime",
+      "mechanism": "synthetic",
+      "units": 100,
+      "period_ms": 0,
+      "replicate": 1,
+      "validity_reasons": [],
+      "verdict": "REQUIRES_ANALYSIS",
+      "windows": {
+        "baseline": {
+          "frames": 800,
+          "blocks": 8,
+          "mean_ms": 10.0,
+          "median_ms": 10.0,
+          "p95_ms": 10.0,
+          "median_fps": 100.0,
+          "elapsed_s": 8.0,
+          "samples_ms": [
+            10.0,
+            10.0,
+            10.0,
+            10.0,
+            10.0,
+            10.0,
+            10.0,
+            10.0
+          ],
+          "sample_frames": [
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100
+          ],
+          "sample_elapsed_s": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "samples_kept": 8,
+          "sample_end_s": [
+            1.0,
+            2.0,
+            3.0,
+            4.0,
+            5.0,
+            6.0,
+            7.0,
+            8.0
+          ],
+          "decimated": false,
+          "timing_source": "entry_wall_clock",
+          "tail_coverage": false
+        },
+        "treatment": {
+          "frames": 800,
+          "blocks": 8,
+          "mean_ms": 12.0,
+          "median_ms": 12.0,
+          "p95_ms": 12.0,
+          "median_fps": 83.33333333333333,
+          "elapsed_s": 9.6,
+          "samples_ms": [
+            12.0,
+            12.0,
+            12.0,
+            12.0,
+            12.0,
+            12.0,
+            12.0,
+            12.0
+          ],
+          "sample_frames": [
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100
+          ],
+          "sample_elapsed_s": [
+            1.2,
+            1.2,
+            1.2,
+            1.2,
+            1.2,
+            1.2,
+            1.2,
+            1.2
+          ],
+          "samples_kept": 8,
+          "sample_end_s": [
+            1.2,
+            2.4,
+            3.5999999999999996,
+            4.8,
+            6.0,
+            7.2,
+            8.4,
+            9.6
+          ],
+          "decimated": false,
+          "timing_source": "entry_wall_clock",
+          "tail_coverage": false
+        },
+        "recovery": {
+          "frames": 800,
+          "blocks": 8,
+          "mean_ms": 10.0,
+          "median_ms": 10.0,
+          "p95_ms": 10.0,
+          "median_fps": 100.0,
+          "elapsed_s": 8.0,
+          "samples_ms": [
+            10.0,
+            10.0,
+            10.0,
+            10.0,
+            10.0,
+            10.0,
+            10.0,
+            10.0
+          ],
+          "sample_frames": [
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100
+          ],
+          "sample_elapsed_s": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "samples_kept": 8,
+          "sample_end_s": [
+            1.0,
+            2.0,
+            3.0,
+            4.0,
+            5.0,
+            6.0,
+            7.0,
+            8.0
+          ],
+          "decimated": false,
+          "timing_source": "entry_wall_clock",
+          "tail_coverage": false
+        }
+      }
+    },
+    {
+      "id": "B1",
+      "variant": "test",
+      "protocol": "a_b_a_prime",
+      "mechanism": "synthetic",
+      "units": 100,
+      "period_ms": 0,
+      "replicate": 2,
+      "validity_reasons": [],
+      "verdict": "REQUIRES_ANALYSIS",
+      "windows": {
+        "baseline": {
+          "frames": 800,
+          "blocks": 8,
+          "mean_ms": 10.0,
+          "median_ms": 10.0,
+          "p95_ms": 10.0,
+          "median_fps": 100.0,
+          "elapsed_s": 8.0,
+          "samples_ms": [
+            10.0,
+            10.0,
+            10.0,
+            10.0,
+            10.0,
+            10.0,
+            10.0,
+            10.0
+          ],
+          "sample_frames": [
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100
+          ],
+          "sample_elapsed_s": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "samples_kept": 8,
+          "sample_end_s": [
+            1.0,
+            2.0,
+            3.0,
+            4.0,
+            5.0,
+            6.0,
+            7.0,
+            8.0
+          ],
+          "decimated": false,
+          "timing_source": "entry_wall_clock",
+          "tail_coverage": false
+        },
+        "treatment": {
+          "frames": 800,
+          "blocks": 8,
+          "mean_ms": 12.0,
+          "median_ms": 12.0,
+          "p95_ms": 12.0,
+          "median_fps": 83.33333333333333,
+          "elapsed_s": 9.6,
+          "samples_ms": [
+            12.0,
+            12.0,
+            12.0,
+            12.0,
+            12.0,
+            12.0,
+            12.0,
+            12.0
+          ],
+          "sample_frames": [
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100
+          ],
+          "sample_elapsed_s": [
+            1.2,
+            1.2,
+            1.2,
+            1.2,
+            1.2,
+            1.2,
+            1.2,
+            1.2
+          ],
+          "samples_kept": 8,
+          "sample_end_s": [
+            1.2,
+            2.4,
+            3.5999999999999996,
+            4.8,
+            6.0,
+            7.2,
+            8.4,
+            9.6
+          ],
+          "decimated": false,
+          "timing_source": "entry_wall_clock",
+          "tail_coverage": false
+        },
+        "recovery": {
+          "frames": 800,
+          "blocks": 8,
+          "mean_ms": 10.0,
+          "median_ms": 10.0,
+          "p95_ms": 10.0,
+          "median_fps": 100.0,
+          "elapsed_s": 8.0,
+          "samples_ms": [
+            10.0,
+            10.0,
+            10.0,
+            10.0,
+            10.0,
+            10.0,
+            10.0,
+            10.0
+          ],
+          "sample_frames": [
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100
+          ],
+          "sample_elapsed_s": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "samples_kept": 8,
+          "sample_end_s": [
+            1.0,
+            2.0,
+            3.0,
+            4.0,
+            5.0,
+            6.0,
+            7.0,
+            8.0
+          ],
+          "decimated": false,
+          "timing_source": "entry_wall_clock",
+          "tail_coverage": false
+        }
+      }
+    }
+  ]
+}

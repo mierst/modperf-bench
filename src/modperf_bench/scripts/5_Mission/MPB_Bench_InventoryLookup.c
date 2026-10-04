@@ -8,18 +8,19 @@
 //
 // SHAPE OF THE MEASUREMENT
 //   No players and no A/B/A' windows are involved. One server-side entity with
-//   attachment slots is created, N lookups run inside a SINGLE frame, and the
+//   attachment slots is created, bounded lookups run inside a SINGLE frame, and the
 //   elapsed wall time comes from GetGame().GetTickTime() deltas around the
 //   loop. The entity is deleted in the same frame. N is large (100k by
 //   default) for two reasons: it takes the total well clear of the float
 //   resolution of GetTickTime, and it makes the loop's own overhead a
 //   measurable fraction rather than a rounding error.
 //
-//   That loop overhead is measured, not assumed: an identical-length control
-//   loop doing a trivial integer add runs first, and both the raw and the
-//   overhead-subtracted per-call figures are reported. The net figure is the
-//   honest lower bound -- a script-level add is not free either, so
-//   subtracting it can only understate the call, never overstate it.
+//   Equal-sized control/lookup pairs alternate order. The control consumes a
+//   cached reference with the same assignment, branch and hit-count sink as
+//   the lookup arm. This estimates the increment over cached-reference work;
+//   it is not a universal native-call cost or a statistically qualified bound.
+//   Raw ordered pair deltas and a conservative clock quantization bound are
+//   retained. A negative or unresolved net difference is inconclusive.
 //
 // ENTITY CHOICE
 //   The default is an ordinary ItemBase with attachment slots rather than a
@@ -38,8 +39,13 @@
 
 class MPB_InventoryLookup
 {
+    static const int MAX_LOOKUPS = 1000000;
+    static const int MAX_REPEATS = 1000;
+    static const int MAX_LOOKUP_CALLS = 10000000;
+
     bool   m_Ok;
     string m_Status;
+    int    m_Replicate;
     string m_RequestedType;
     string m_UsedType;
     bool   m_Substituted;
@@ -55,17 +61,25 @@ class MPB_InventoryLookup
     int    m_Repeats;
     int    m_TotalCalls;
     int    m_Hits;
+    int    m_ControlHits;
+    int    m_PairCount;
+    int    m_RepeatsPerPair;
     float  m_TickResolutionSeconds;
     float  m_PerCallNsResolution;
     float  m_ControlSeconds;
     float  m_MeasuredSeconds;
     float  m_PerCallNsRaw;
     float  m_PerCallNsNet;
+    float  m_QuantizationBoundSeconds;
+    ref array<float> m_PairControlSeconds;
+    ref array<float> m_PairMeasuredSeconds;
+    ref array<float> m_PairDeltaSeconds;
 
     void MPB_InventoryLookup()
     {
         m_Ok = false;
         m_Status = "NOT_RUN";
+        m_Replicate = 0;
         m_RequestedType = "";
         m_UsedType = "";
         m_Substituted = false;
@@ -81,12 +95,65 @@ class MPB_InventoryLookup
         m_Repeats = 0;
         m_TotalCalls = 0;
         m_Hits = 0;
+        m_ControlHits = 0;
+        m_PairCount = 0;
+        m_RepeatsPerPair = 0;
         m_TickResolutionSeconds = 0;
         m_PerCallNsResolution = 0;
         m_ControlSeconds = 0;
         m_MeasuredSeconds = 0;
         m_PerCallNsRaw = 0;
         m_PerCallNsNet = 0;
+        m_QuantizationBoundSeconds = 0;
+        m_PairControlSeconds = new array<float>();
+        m_PairMeasuredSeconds = new array<float>();
+        m_PairDeltaSeconds = new array<float>();
+    }
+
+    // Check before multiplying or spawning. The single-frame workload limit
+    // counts lookup calls; the control adds the same number of iterations.
+    static bool WorkIsBounded(int lookups, int repeats)
+    {
+        if (lookups < 1 || lookups > MAX_LOOKUPS || repeats < 2 || repeats > MAX_REPEATS)
+        {
+            return false;
+        }
+        if (BalancedPairCount(repeats) == 0)
+        {
+            return false;
+        }
+        return lookups <= MAX_LOOKUP_CALLS / repeats;
+    }
+
+    // Preserve total amplification and equal work for both orderings.
+    static int BalancedPairCount(int repeats)
+    {
+        if (repeats < 2 || repeats % 2 != 0)
+        {
+            return 0;
+        }
+        if (repeats % 4 == 0)
+        {
+            return 4;
+        }
+        return 2;
+    }
+
+    static string DeltaStatus(float netSeconds, float boundSeconds)
+    {
+        if (boundSeconds <= 0)
+        {
+            return "CLOCK_UNRESOLVED";
+        }
+        if (netSeconds < 0)
+        {
+            return "NEGATIVE_DELTA";
+        }
+        if (netSeconds <= boundSeconds)
+        {
+            return "BELOW_RESOLUTION";
+        }
+        return "MEASURED";
     }
 
     // Creates the subject entity, or null. Kept separate so Run() does not
@@ -189,6 +256,40 @@ class MPB_InventoryLookup
         m_SlotName = slotName;
         m_AttachmentType = attachmentType;
         m_Lookups = lookups;
+        m_Repeats = repeats;
+        m_Ok = false;
+        m_Status = "NOT_RUN";
+        m_Hits = 0;
+        m_ControlHits = 0;
+        m_ControlSeconds = 0;
+        m_MeasuredSeconds = 0;
+        m_TotalCalls = 0;
+        m_PairCount = 0;
+        m_RepeatsPerPair = 0;
+        m_TickResolutionSeconds = 0;
+        m_QuantizationBoundSeconds = 0;
+        m_PerCallNsRaw = 0;
+        m_PerCallNsNet = 0;
+        m_PerCallNsResolution = 0;
+        m_UsedType = "";
+        m_Substituted = false;
+        m_AttachmentCreated = false;
+        m_AttachmentPresent = false;
+        m_SlotId = -1;
+        m_SlotCount = 0;
+        m_ResolvedSlotName = "";
+        m_SlotSource = "";
+        m_PairControlSeconds.Clear();
+        m_PairMeasuredSeconds.Clear();
+        m_PairDeltaSeconds.Clear();
+        if (!WorkIsBounded(lookups, repeats))
+        {
+            m_Status = "INVALID_WORK";
+            return;
+        }
+        m_TotalCalls = lookups * repeats;
+        m_PairCount = BalancedPairCount(repeats);
+        m_RepeatsPerPair = repeats / m_PairCount;
 
         EntityAI subject = SpawnSubject(preferredType, position);
         if (subject)
@@ -253,114 +354,148 @@ class MPB_InventoryLookup
             warmResult = inventory.FindAttachment(m_SlotId);
         }
 
-        if (repeats < 1)
-        {
-            repeats = 1;
-        }
-        m_Repeats = repeats;
-        m_TotalCalls = lookups * repeats;
-
-        // The clock's resolution is measured, not assumed. On the test box
-        // GetTickTime advances in ~1 ms steps, which is coarser than a whole
-        // 100k-call loop -- the first version of this bench timed each repeat
-        // separately and reported per-call figures that were pure
-        // quantization: a control loop that landed on 0 ms one run and 1 ms
-        // the next moved the "net" per-call cost by 50%.
-        //
-        // So the WHOLE batch is timed as one measurement rather than each
-        // repeat, and `repeats` exists to push the batch far enough past the
-        // clock step that the step stops mattering. The measured resolution is
-        // reported alongside the result so a reader can check that for
-        // themselves instead of trusting it.
+        // A bounded probe records observed quantization. If it cannot observe
+        // a positive step, do not start the amplified timing batches.
         m_TickResolutionSeconds = MeasureTickResolution();
+        if (m_TickResolutionSeconds <= 0)
+        {
+            GetGame().ObjectDelete(subject);
+            m_Status = "CLOCK_UNRESOLVED";
+            return;
+        }
 
-        int sink = 0;
-        int hits = 0;
-        int repeatIndex;
+        EntityAI cachedResult = inventory.FindAttachment(m_SlotId);
+        bool invalidClock = false;
+        int pairIndex;
+        for (pairIndex = 0; pairIndex < m_PairCount; pairIndex++)
+        {
+            float pairControl;
+            float pairMeasured;
+            if (pairIndex % 2 == 0)
+            {
+                pairControl = TimeControlBatch(cachedResult, lookups, m_RepeatsPerPair);
+                pairMeasured = TimeLookupBatch(inventory, lookups, m_RepeatsPerPair);
+            }
+            else
+            {
+                pairMeasured = TimeLookupBatch(inventory, lookups, m_RepeatsPerPair);
+                pairControl = TimeControlBatch(cachedResult, lookups, m_RepeatsPerPair);
+            }
+            if (pairControl < 0 || pairMeasured < 0)
+            {
+                invalidClock = true;
+            }
+            m_ControlSeconds = m_ControlSeconds + pairControl;
+            m_MeasuredSeconds = m_MeasuredSeconds + pairMeasured;
+            m_PairControlSeconds.Insert(pairControl);
+            m_PairMeasuredSeconds.Insert(pairMeasured);
+            m_PairDeltaSeconds.Insert(pairMeasured - pairControl);
+        }
+
+        GetGame().ObjectDelete(subject);
+        // Each measured interval may be off by one clock step; a paired
+        // difference by two. Sum these bounds instead of claiming averaging
+        // makes deterministic quantization disappear.
+        m_QuantizationBoundSeconds = 2 * m_PairCount * m_TickResolutionSeconds;
+        m_PerCallNsRaw = (m_MeasuredSeconds * 1000000000.0) / m_TotalCalls;
+        m_PerCallNsNet = ((m_MeasuredSeconds - m_ControlSeconds) * 1000000000.0) / m_TotalCalls;
+        m_PerCallNsResolution = (m_QuantizationBoundSeconds * 1000000000.0) / m_TotalCalls;
+        m_Status = DeltaStatus(m_MeasuredSeconds - m_ControlSeconds, m_QuantizationBoundSeconds);
+        if (invalidClock)
+        {
+            m_Status = "CLOCK_NONMONOTONIC";
+        }
+        if (m_Hits != m_ControlHits)
+        {
+            m_Status = "HIT_MISMATCH";
+        }
+        m_Ok = m_Status == "MEASURED";
+    }
+
+    private float TimeControlBatch(EntityAI cachedResult, int lookups, int repeats)
+    {
+        int controlHits = 0;
+        int controlRepeat;
         int controlIndex;
-        int measureIndex;
-        EntityAI found;
-
-        // Control batch: same iteration count, trivial body.
+        EntityAI controlFound;
         float controlStart = GetGame().GetTickTime();
-        for (repeatIndex = 0; repeatIndex < repeats; repeatIndex++)
+        for (controlRepeat = 0; controlRepeat < repeats; controlRepeat++)
         {
             for (controlIndex = 0; controlIndex < lookups; controlIndex++)
             {
-                sink = sink + controlIndex;
-            }
-        }
-        float controlEnd = GetGame().GetTickTime();
-
-        // Measured batch. The result is consumed so the call cannot be treated
-        // as dead.
-        int measureRepeat;
-        float measureStart = GetGame().GetTickTime();
-        for (measureRepeat = 0; measureRepeat < repeats; measureRepeat++)
-        {
-            for (measureIndex = 0; measureIndex < lookups; measureIndex++)
-            {
-                found = inventory.FindAttachment(m_SlotId);
-                if (found)
+                controlFound = cachedResult;
+                if (controlFound)
                 {
-                    hits++;
+                    controlHits++;
                 }
             }
         }
-        float measureEnd = GetGame().GetTickTime();
-
-        GetGame().ObjectDelete(subject);
-
-        m_Hits = hits;
-        m_ControlSeconds = controlEnd - controlStart;
-        m_MeasuredSeconds = measureEnd - measureStart;
-
-        if (m_TotalCalls > 0)
-        {
-            m_PerCallNsRaw = (m_MeasuredSeconds * 1000000000.0) / m_TotalCalls;
-            m_PerCallNsNet = ((m_MeasuredSeconds - m_ControlSeconds) * 1000000000.0) / m_TotalCalls;
-            // What one clock step is worth per call -- the floor on how
-            // precisely this figure can possibly be known.
-            m_PerCallNsResolution = (m_TickResolutionSeconds * 1000000000.0) / m_TotalCalls;
-        }
-
-        // sink is only here to keep the control loop honest; reference it so
-        // the compiler cannot consider it unused.
-        if (sink < 0)
-        {
-            m_Status = "IMPOSSIBLE";
-        }
-
-        m_Ok = true;
-        m_Status = "MEASURED";
+        float controlEnd = GetGame().GetTickTime();
+        m_ControlHits = m_ControlHits + controlHits;
+        return controlEnd - controlStart;
     }
 
-    // Smallest observable step of GetGame().GetTickTime(): spin until the
-    // value changes twice and take the second interval (the first is a
-    // partial step, since the spin started mid-tick).
+    private float TimeLookupBatch(GameInventory inventory, int lookups, int repeats)
+    {
+        int lookupHits = 0;
+        int lookupRepeat;
+        int lookupIndex;
+        EntityAI lookupFound;
+        float lookupStart = GetGame().GetTickTime();
+        for (lookupRepeat = 0; lookupRepeat < repeats; lookupRepeat++)
+        {
+            for (lookupIndex = 0; lookupIndex < lookups; lookupIndex++)
+            {
+                lookupFound = inventory.FindAttachment(m_SlotId);
+                if (lookupFound)
+                {
+                    lookupHits++;
+                }
+            }
+        }
+        float lookupEnd = GetGame().GetTickTime();
+        m_Hits = m_Hits + lookupHits;
+        return lookupEnd - lookupStart;
+    }
+
+    // Observe eight complete steps after discarding the first partial step.
+    // The largest observed step conservatively includes float quantization
+    // and sampling gaps. This is clock evidence, not an uncertainty interval
+    // for environmental noise. The probe is bounded even if the clock stalls.
     private float MeasureTickResolution()
     {
-        float first = GetGame().GetTickTime();
+        float previous = GetGame().GetTickTime();
+        float observedStep = 0;
+        int transitions = 0;
         int spinGuard = 0;
-        while (GetGame().GetTickTime() == first && spinGuard < 20000000)
+        while (transitions < 9 && spinGuard < 2000000)
         {
             spinGuard++;
+            float current = GetGame().GetTickTime();
+            if (current < previous)
+            {
+                return 0;
+            }
+            if (current > previous)
+            {
+                float elapsedStep = current - previous;
+                if (transitions > 0 && elapsedStep > observedStep)
+                {
+                    observedStep = elapsedStep;
+                }
+                previous = current;
+                transitions++;
+            }
         }
-        float second = GetGame().GetTickTime();
-        while (GetGame().GetTickTime() == second && spinGuard < 40000000)
+        if (transitions < 9)
         {
-            spinGuard++;
+            return 0;
         }
-        float third = GetGame().GetTickTime();
-        return third - second;
+        return observedStep;
     }
 
     string SummaryText()
     {
-        if (!m_Ok)
-        {
-            return "B3 status=" + m_Status;
-        }
         // Built in steps rather than as one expression: Enforce rejects a
         // long concatenation chain with "Formula too complex", and the limit
         // is low enough that a summary line hits it.
@@ -373,7 +508,14 @@ class MPB_InventoryLookup
         text = text + " ctrl_ms=" + MPB_Fmt.Ms(m_ControlSeconds * 1000.0);
         text = text + " clock_step_ms=" + MPB_Fmt.Ms(m_TickResolutionSeconds * 1000.0);
         text = text + " per_call_ns_raw=" + MPB_Fmt.Ns(m_PerCallNsRaw);
-        text = text + " per_call_ns_net=" + MPB_Fmt.Ns(m_PerCallNsNet);
+        if (m_Ok)
+        {
+            text = text + " per_call_ns_net=" + MPB_Fmt.Ns(m_PerCallNsNet);
+        }
+        else
+        {
+            text = text + " per_call_ns_net=inconclusive";
+        }
         text = text + " resolution_ns=" + MPB_Fmt.Ns(m_PerCallNsResolution);
         text = text + " verdict=" + m_Status;
         return text;
@@ -384,8 +526,28 @@ class MPB_InventoryLookup
         string text = "    {\n";
         text = text + "      \"id\": \"B3\",\n";
         text = text + "      \"name\": \"inventory lookup\",\n";
-        text = text + "      \"protocol\": \"single_frame_loop\",\n";
+        text = text + "      \"mechanism\": \"inventory_lookup\",\n";
+        text = text + "      \"replicate\": " + m_Replicate + ",\n";
+        if (m_AttachmentPresent)
+        {
+            text = text + "      \"variant\": \"occupied_slot\",\n";
+        }
+        else
+        {
+            text = text + "      \"variant\": \"empty_slot\",\n";
+        }
+        text = text + "      \"protocol\": \"paired_loops\",\n";
+        text = text + "      \"protocol_version\": 2,\n";
+        text = text + "      \"control\": \"cached_reference_assignment_branch_hit_sink\",\n";
         text = text + "      \"status\": " + MPB_Fmt.Quoted(m_Status) + ",\n";
+        if (m_Ok)
+        {
+            text = text + "      \"validity_reasons\": [],\n";
+        }
+        else
+        {
+            text = text + "      \"validity_reasons\": [" + MPB_Fmt.Quoted(m_Status) + "],\n";
+        }
         text = text + "      \"requested_entity\": " + MPB_Fmt.Quoted(m_RequestedType) + ",\n";
         text = text + "      \"entity\": " + MPB_Fmt.Quoted(m_UsedType) + ",\n";
         text = text + "      \"entity_substituted\": " + MPB_Fmt.Bool(m_Substituted) + ",\n";
@@ -400,16 +562,87 @@ class MPB_InventoryLookup
         text = text + "      \"lookups\": " + m_Lookups + ",\n";
         text = text + "      \"repeats\": " + m_Repeats + ",\n";
         text = text + "      \"total_calls\": " + m_TotalCalls + ",\n";
-        text = text + "      \"clock_step_ms\": " + MPB_Fmt.Ms(m_TickResolutionSeconds * 1000.0) + ",\n";
-        text = text + "      \"per_call_ns_resolution\": " + MPB_Fmt.Ns(m_PerCallNsResolution) + ",\n";
+        text = text + "      \"pair_count\": " + m_PairCount + ",\n";
+        text = text + "      \"repeats_per_pair\": " + m_RepeatsPerPair + ",\n";
+        if (m_TickResolutionSeconds > 0)
+        {
+            text = text + "      \"clock_step_ms\": " + MPB_Fmt.Ms(m_TickResolutionSeconds * 1000.0) + ",\n";
+        }
+        else
+        {
+            text = text + "      \"clock_step_ms\": null,\n";
+        }
         text = text + "      \"hits\": " + m_Hits + ",\n";
-        text = text + "      \"control_loop_ms\": " + MPB_Fmt.Ms(m_ControlSeconds * 1000.0) + ",\n";
-        text = text + "      \"measured_loop_ms\": " + MPB_Fmt.Ms(m_MeasuredSeconds * 1000.0) + ",\n";
-        text = text + "      \"per_call_ns_raw\": " + MPB_Fmt.Ns(m_PerCallNsRaw) + ",\n";
-        text = text + "      \"per_call_ns_net\": " + MPB_Fmt.Ns(m_PerCallNsNet) + ",\n";
+        text = text + "      \"control_hits\": " + m_ControlHits + ",\n";
+        if (m_PairDeltaSeconds.Count() > 0)
+        {
+            text = text + "      \"control_loop_ms\": " + MPB_Fmt.Ms(m_ControlSeconds * 1000.0) + ",\n";
+            text = text + "      \"measured_loop_ms\": " + MPB_Fmt.Ms(m_MeasuredSeconds * 1000.0) + ",\n";
+            text = text + "      \"per_call_ns_raw\": " + MPB_Fmt.Ns(m_PerCallNsRaw) + ",\n";
+            text = text + "      \"per_call_ns_resolution\": " + MPB_Fmt.Ns(m_PerCallNsResolution) + ",\n";
+        }
+        else
+        {
+            text = text + "      \"control_loop_ms\": null,\n";
+            text = text + "      \"measured_loop_ms\": null,\n";
+            text = text + "      \"per_call_ns_raw\": null,\n";
+            text = text + "      \"per_call_ns_resolution\": null,\n";
+        }
+        if (m_Ok)
+        {
+            text = text + "      \"per_call_ns_net\": " + MPB_Fmt.Ns(m_PerCallNsNet) + ",\n";
+        }
+        else
+        {
+            text = text + "      \"per_call_ns_net\": null,\n";
+        }
+        if (m_PairDeltaSeconds.Count() > 0)
+        {
+            text = text + "      \"net_ns_diagnostic\": " + MPB_Fmt.Ns(m_PerCallNsNet) + ",\n";
+            text = text + "      \"quantization_bound_ms\": " + MPB_Fmt.Ms(m_QuantizationBoundSeconds * 1000.0) + ",\n";
+            text = text + "      \"resolution_bound_ns_lower\": " + MPB_Fmt.Ns(m_PerCallNsNet - m_PerCallNsResolution) + ",\n";
+            text = text + "      \"resolution_bound_ns_upper\": " + MPB_Fmt.Ns(m_PerCallNsNet + m_PerCallNsResolution) + ",\n";
+        }
+        else
+        {
+            text = text + "      \"net_ns_diagnostic\": null,\n";
+            text = text + "      \"quantization_bound_ms\": null,\n";
+            text = text + "      \"resolution_bound_ns_lower\": null,\n";
+            text = text + "      \"resolution_bound_ns_upper\": null,\n";
+        }
+        text = text + "      \"resolution_bound_kind\": \"observed_clock_quantization_only\",\n";
+        text = text + "      \"pairs\": " + PairsJson() + ",\n";
         text = text + "      \"model_ns\": null,\n";
         text = text + "      \"verdict\": " + MPB_Fmt.Quoted(m_Status) + "\n";
         text = text + "    }";
         return text;
+    }
+
+    private string PairsJson()
+    {
+        string pairsText = "[";
+        int jsonPair;
+        for (jsonPair = 0; jsonPair < m_PairDeltaSeconds.Count(); jsonPair++)
+        {
+            if (jsonPair > 0)
+            {
+                pairsText = pairsText + ",";
+            }
+            string pairText = "{\"index\":" + jsonPair;
+            if (jsonPair % 2 == 0)
+            {
+                pairText = pairText + ",\"order\":\"control_lookup\"";
+            }
+            else
+            {
+                pairText = pairText + ",\"order\":\"lookup_control\"";
+            }
+            pairText = pairText + ",\"calls\":" + (m_Lookups * m_RepeatsPerPair);
+            pairText = pairText + ",\"control_ms\":" + MPB_Fmt.Ms(m_PairControlSeconds.Get(jsonPair) * 1000.0);
+            pairText = pairText + ",\"lookup_ms\":" + MPB_Fmt.Ms(m_PairMeasuredSeconds.Get(jsonPair) * 1000.0);
+            pairText = pairText + ",\"delta_ms\":" + MPB_Fmt.Ms(m_PairDeltaSeconds.Get(jsonPair) * 1000.0);
+            pairsText = pairsText + pairText + "}";
+        }
+        return pairsText + "]";
     }
 }

@@ -101,6 +101,9 @@ class MPB_Fmt
         string copy = text;
         copy.Replace("\\", "/");
         copy.Replace("\"", "'");
+        copy.Replace("\n", " ");
+        copy.Replace("\r", " ");
+        copy.Replace("\t", " ");
         return copy;
     }
 
@@ -111,6 +114,30 @@ class MPB_Fmt
 
     // Enforce renders a bool through string concatenation as 0/1. JSON
     // consumers expect the keywords, so booleans go through here.
+    static string StringArray(array<string> values)
+    {
+        string text = "[";
+        int index;
+        for (index = 0; index < values.Count(); index++)
+        {
+            if (index > 0) text = text + ",";
+            text = text + Quoted(values.Get(index));
+        }
+        return text + "]";
+    }
+
+    static string IntArray(array<int> values)
+    {
+        string text = "[";
+        int index;
+        for (index = 0; index < values.Count(); index++)
+        {
+            if (index > 0) text = text + ",";
+            text = text + values.Get(index);
+        }
+        return text + "]";
+    }
+
     static string Bool(bool value)
     {
         if (value)

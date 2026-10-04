@@ -2,9 +2,8 @@
 // MPB_FrameClock -- per-frame duration capture and window statistics.
 //
 // SOURCE OF TRUTH
-//   The `timeslice` parameter of MissionServer.OnUpdate, in seconds. That is
-//   the engine's own frame delta; no profiler is involved, because the engine
-//   profiler is stubbed on retail server builds and cannot be relied on.
+//   The runner supplies entry-to-entry GetTickTime gaps, in seconds. These
+//   are elapsed delays, not CPU service time. No profiler is involved.
 //   Wall-clock elapsed within a single frame is measured separately, with
 //   GetGame().GetTickTime(), by the benches that need it.
 //
@@ -30,8 +29,8 @@
 //   frame -- exactly the raw per-frame measurement, which is the right
 //   behaviour when frames are long enough to measure directly.
 //
-//   Mean is computed from a running sum over EVERY frame, independent of
-//   blocking and of decimation, so it is exact.
+//   Mean is computed from the clock sum over EVERY observed frame, independent
+//   of blocking and decimation. Clock precision still limits the measurement.
 //
 // WHY THE SAMPLES ARE DECIMATED
 //   Even blocked, a long window is a lot of samples, and keeping all of them
@@ -51,6 +50,10 @@ class MPB_FrameClock
     static const int MAX_BLOCK_FRAMES = 65536;
 
     ref array<float> m_Samples;
+    ref array<float> m_SortedSamples;
+    ref array<int> m_SampleFrames;
+    ref array<float> m_SampleElapsed;
+    ref array<float> m_SampleEnd;
     float m_BlockTargetSeconds;
 
     int   m_KeepStride;
@@ -68,6 +71,10 @@ class MPB_FrameClock
     void MPB_FrameClock()
     {
         m_Samples = new array<float>();
+        m_SortedSamples = new array<float>();
+        m_SampleFrames = new array<int>();
+        m_SampleElapsed = new array<float>();
+        m_SampleEnd = new array<float>();
         m_BlockTargetSeconds = 0.01;
         Reset();
     }
@@ -91,6 +98,10 @@ class MPB_FrameClock
     void Reset()
     {
         m_Samples.Clear();
+        m_SortedSamples.Clear();
+        m_SampleFrames.Clear();
+        m_SampleElapsed.Clear();
+        m_SampleEnd.Clear();
         m_KeepStride = 1;
         m_StrideCounter = 0;
         m_TotalFrames = 0;
@@ -139,7 +150,22 @@ class MPB_FrameClock
             return;
         }
 
+        RecordBlock();
+    }
+
+    void Flush()
+    {
+        if (m_BlockFrames > 0)
+        {
+            RecordBlock();
+        }
+    }
+
+    private void RecordBlock()
+    {
         float blockMean = m_BlockSeconds / m_BlockFrames;
+        int blockFrames = m_BlockFrames;
+        float blockElapsed = m_BlockSeconds;
         m_BlockCount++;
         m_BlockFramesTotal = m_BlockFramesTotal + m_BlockFrames;
         m_BlockSeconds = 0;
@@ -153,6 +179,9 @@ class MPB_FrameClock
         m_StrideCounter = 0;
 
         m_Samples.Insert(blockMean);
+        m_SampleFrames.Insert(blockFrames);
+        m_SampleElapsed.Insert(blockElapsed);
+        m_SampleEnd.Insert(m_TotalSeconds);
         m_Sorted = false;
 
         if (m_Samples.Count() >= MAX_SAMPLES)
@@ -170,9 +199,15 @@ class MPB_FrameClock
         for (readIndex = 0; readIndex < sourceCount; readIndex = readIndex + 2)
         {
             m_Samples.Set(writeIndex, m_Samples.Get(readIndex));
+            m_SampleFrames.Set(writeIndex, m_SampleFrames.Get(readIndex));
+            m_SampleElapsed.Set(writeIndex, m_SampleElapsed.Get(readIndex));
+            m_SampleEnd.Set(writeIndex, m_SampleEnd.Get(readIndex));
             writeIndex++;
         }
         m_Samples.Resize(writeIndex);
+        m_SampleFrames.Resize(writeIndex);
+        m_SampleElapsed.Resize(writeIndex);
+        m_SampleEnd.Resize(writeIndex);
         m_KeepStride = m_KeepStride * 2;
     }
 
@@ -234,7 +269,13 @@ class MPB_FrameClock
         {
             return;
         }
-        m_Samples.Sort();
+        m_SortedSamples.Clear();
+        int copyIndex;
+        for (copyIndex = 0; copyIndex < m_Samples.Count(); copyIndex++)
+        {
+            m_SortedSamples.Insert(m_Samples.Get(copyIndex));
+        }
+        m_SortedSamples.Sort();
         m_Sorted = true;
     }
 
@@ -257,7 +298,7 @@ class MPB_FrameClock
         {
             index = count - 1;
         }
-        return m_Samples.Get(index) * 1000.0;
+        return m_SortedSamples.Get(index) * 1000.0;
     }
 
     float MedianMs()
@@ -309,6 +350,52 @@ class MPB_FrameClock
             return 0;
         }
         return spread / Math.Sqrt(count);
+    }
+
+    // Ordered block means and weights; p95 here is a BLOCK quantile,
+    // not a single-frame tail. Decimated runs cannot qualify uncertainty.
+    string SnapshotJson()
+    {
+        Flush();
+        string text = "{\"frames\": " + m_TotalFrames;
+        text = text + ", \"blocks\": " + m_BlockCount;
+        text = text + ", \"elapsed_s\": " + MPB_Fmt.Dec(m_TotalSeconds, 6);
+        text = text + ", \"mean_ms\": " + MPB_Fmt.Dec(MeanMs(), 6);
+        text = text + ", \"median_ms\": " + MPB_Fmt.Dec(MedianMs(), 6);
+        text = text + ", \"p95_ms\": " + MPB_Fmt.Dec(P95Ms(), 6);
+        text = text + ", \"median_fps\": " + MPB_Fmt.Fps(MedianFps());
+        text = text + ", \"samples_kept\": " + m_Samples.Count();
+        text = text + ", \"decimated\": " + MPB_Fmt.Bool(m_KeepStride > 1);
+        text = text + ", \"timing_source\": \"entry_wall_clock\"";
+        text = text + ", \"tail_coverage\": false, \"samples_ms\": [";
+        int sampleIndex;
+        for (sampleIndex = 0; sampleIndex < m_Samples.Count(); sampleIndex++)
+        {
+            if (sampleIndex > 0) text = text + ",";
+            text = text + MPB_Fmt.Dec(m_Samples.Get(sampleIndex) * 1000.0, 6);
+        }
+        text = text + "], \"sample_frames\": [";
+        int frameIndex;
+        for (frameIndex = 0; frameIndex < m_SampleFrames.Count(); frameIndex++)
+        {
+            if (frameIndex > 0) text = text + ",";
+            text = text + m_SampleFrames.Get(frameIndex);
+        }
+        text = text + "], \"sample_elapsed_s\": [";
+        int elapsedIndex;
+        for (elapsedIndex = 0; elapsedIndex < m_SampleElapsed.Count(); elapsedIndex++)
+        {
+            if (elapsedIndex > 0) text = text + ",";
+            text = text + MPB_Fmt.Dec(m_SampleElapsed.Get(elapsedIndex), 6);
+        }
+        text = text + "], \"sample_end_s\": [";
+        int endIndex;
+        for (endIndex = 0; endIndex < m_SampleEnd.Count(); endIndex++)
+        {
+            if (endIndex > 0) text = text + ",";
+            text = text + MPB_Fmt.Dec(m_SampleEnd.Get(endIndex), 6);
+        }
+        return text + "]}";
     }
 
     string SummaryText()
